@@ -64,6 +64,18 @@ pipeline{
                     }    
                 }
             }
+            
+            stage('Manual Approval'){
+                steps{
+                    script{
+                        timeout(8) {
+                            mail bcc: '', body: "<br>JavaApp: ${env.JOB_NAME} <br>Build Number: ${env.BUILD_NUMBER} <br> Go to build URL and Approve the deployment request <br> URL de build: ${env.BUILD_URL}", cc: '', charset: 'UTF-8', from: '', mimeType: 'text/html', replyTo: '', subject: "${currentBuild.result} CI: Project name -> ${env.JOB_NAME}", to: "devdjango101@gmail.com";
+                            input(id: "Deploy Gate", message: "Deploy ${params.project_name}?", ok: 'Deploy')        
+                        }
+                    }
+                }
+            }
+
             stage('Deploying Application to K8s Cluster') {
                 steps {
                     script{
@@ -75,8 +87,16 @@ pipeline{
                     }
                 }
             }
+            stage('verifying app deployment'){
+                steps{
+                    script{
+                        withCredentials([kubeconfigFile(credentialsId: 'kubernetes-config', variable: 'KUBECONFIG')]) {
+                            sh 'kubectl run curl --image=curlimages/curl -i --rm --restart=Never -- curl myjavaapp-myapp:8080'
+                        }
+                    }
+                }
+            }
         }
-
     post {
 	    always {
 		    mail bcc: '', body: "<br>Project: ${env.JOB_NAME} <br>Build Number: ${env.BUILD_NUMBER} <br> URL de build: ${env.BUILD_URL}", cc: '', charset: 'UTF-8', from: '', mimeType: 'text/html', replyTo: '', subject: "${currentBuild.result} CI: Project name -> ${env.JOB_NAME}", to: "devdjango101@gmail.com";  
