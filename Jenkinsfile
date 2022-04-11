@@ -12,12 +12,12 @@ pipeline{
                                 -Dsonar.login=545bf3352cace5bce9c03c6b8b7124f96d49b2f8'
                     }
 
-                    timeout(time: 1, unit: 'HOURS') {
-                      def qg = waitForQualityGate()
-                      if (qg.status != 'OK') {
-                           error "Pipeline aborted due to quality gate failure: ${qg.status}"
-                      }
-                    }
+                    // timeout(time: 1, unit: 'HOURS') {
+                    //   def qg = waitForQualityGate()
+                    //   if (qg.status != 'OK') {
+                    //        error "Pipeline aborted due to quality gate failure: ${qg.status}"
+                    //   }
+                    // }
 
                 }  
             }
