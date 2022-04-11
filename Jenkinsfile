@@ -29,7 +29,7 @@ pipeline{
                 script{
                     withCredentials([string(credentialsId: 'nexus_pass', variable: 'nexuspass')]) {
                         sh '''
-                            docker build -t 13.234.139.97:8083/javaapp:${VERSION} 
+                            docker build -t 13.234.139.97:8083/javaapp:${VERSION} .
                             docker login -u admin -p $nexuspass 13.234.139.97:8083
                             docker push 13.234.139.97:8083/javaappp:${VERSION}
                             docker rmi 13.234.139.97:8083/javaappp:${VERSION}
