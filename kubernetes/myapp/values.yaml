@@ -11,6 +11,6 @@ image:
   tag: IMAGE_TAG
 
 service:
-  type: NodePort
+  type: Ingress
   port: 8080
 
