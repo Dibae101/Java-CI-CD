@@ -9,6 +9,7 @@ pipeline{
                 script{
                     withSonarQubeEnv(credentialsId: 'sonarapp', variable: 'sonartoken') {
                             sh 'chmod +x gradlew'
+                            sh './gradlew build'
                             sh './gradlew sonarqube \
                                 -Dsonar.projectKey=sonarapp \
                                 -Dsonar.host.url=http://65.0.197.61:9000 \
