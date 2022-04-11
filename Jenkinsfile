@@ -57,12 +57,23 @@ pipeline{
                                 tar -czvf  myapp-${helmversion}.tgz myapp/
                                 curl -u admin:$nexuspass http://13.234.139.97:8081/repository/helm-hosted/ --upload-file myapp-${helmversion}.tgz -v
                                 '''
+                            }
+                        }
+                    }    
+                }
+            }
+            stage('Deploying Application to K8s Cluster') {
+                steps {
+                    script{
+                        withCredentials([kubeconfigFile(credentialsId: 'kubernetes-config', variable: 'KUBECONFIG')]) {
+                            dir('kubernetes/') {
+                                sh 'helm upgrade --install --set image.repository="13.234.139.97:8083/javaapp" --set image.tag="${VERSION}" myjavaapp myapp/ '
+                            }
+                        }
                     }
                 }
-            } 
+            }
         }
-    }
-}
 
     post {
 	    always {
