@@ -26,9 +26,3 @@ test {
 }
 
 
-sonarqube {
-    properties {
-        property 'sonar.host.url', 'http://65.0.197.61:9000/'
-        property 'sonar.login', '62551b929d472b48a04df923b007b3c085421803'
-    }
-}
