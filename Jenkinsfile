@@ -1,5 +1,8 @@
 pipeline{
-    agent any 
+    agent any
+    environment {
+        VERSION = "${env.BUILD_ID}"
+    }
     stages{
         stage("sonar quality check"){
             steps{
@@ -19,6 +22,20 @@ pipeline{
                         }
                     }
                 }  
+            }
+        }
+        stage ("Docker Build and Docker Push"){
+            steps{
+                script{
+                    withCredentials([string(credentialsId: 'nexus_pass', variable: 'nexuspass')]) {
+                        sh '''
+                            docker build -t 13.234.139.97:8083/javaapp:${VERSION} 
+                            docker login -u admin -p $nexuspass 13.234.139.97:8083
+                            docker push 13.234.139.97:8083/javaappp:${VERSION}
+                            docker rmi 13.234.139.97:8083/javaappp:${VERSION}
+                        '''
+                    }
+                }
             }
         }
     }
