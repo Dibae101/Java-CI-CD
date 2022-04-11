@@ -7,12 +7,12 @@ pipeline{
         stage("sonar quality check"){
             steps{
                 script{
-                    withCredentials([string(credentialsId: 'sonarapp', variable: 'sonarlogin')]) {
+                    withSonarQubeEnv(credentialsId: 'sonarapp', variable: 'sonartoken') {
                             sh 'chmod +x gradlew'
                             sh './gradlew sonarqube \
                                 -Dsonar.projectKey=sonarapp \
                                 -Dsonar.host.url=http://65.0.197.61:9000 \
-                                -Dsonar.login=$sonarlogin'
+                                -Dsonar.login=$sonartoken'
                     }
 
                     timeout(activity: true, time: 2) {
