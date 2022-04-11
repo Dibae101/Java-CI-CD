@@ -11,6 +11,5 @@ image:
   tag: IMAGE_TAG
 
 service:
-  type: ClusterIP
+  type: NodePort
   port: 8080
-
