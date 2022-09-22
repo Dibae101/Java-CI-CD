@@ -12,7 +12,7 @@ pipeline{
                             sh './gradlew build'
                             sh './gradlew sonarqube \
                                 -Dsonar.projectKey=sonarapp \
-                                -Dsonar.host.url=http://65.0.197.61:9000 \
+                                -Dsonar.host.url=http://SonarHostIP:9000 \
                                 -Dsonar.login=$sonartoken'
                     }
 
@@ -30,10 +30,10 @@ pipeline{
                 script{
                     withCredentials([string(credentialsId: 'nexus_pass', variable: 'nexuspass')]) {
                         sh '''
-                            docker build -t 13.234.139.97:8083/javaapp:${VERSION} .
-                            docker login -u admin -p $nexuspass 13.234.139.97:8083
-                            docker push 13.234.139.97:8083/javaapp:${VERSION}
-                            docker rmi 13.234.139.97:8083/javaapp:${VERSION}
+                            docker build -t ServerIP:8083/javaapp:${VERSION} .
+                            docker login -u admin -p $nexuspass ServerIP:8083
+                            docker push ServerIP:8083/javaapp:${VERSION}
+                            docker rmi ServerIP:8083/javaapp:${VERSION}
                         '''
                     }
                 }
@@ -43,7 +43,7 @@ pipeline{
             steps{
                 script{
                     dir('kubernetes/') {
-                        withEnv(['DATREE_TOKEN=c4ab416a-460e-460a-af6d-e033d9bb0214']) {
+                        withEnv(['DATREE_TOKEN=Datree-Token']) {
                             sh 'helm datree test myapp/'
                         }
                     }
@@ -58,7 +58,7 @@ pipeline{
                             sh '''
                                 helmversion=$( helm show chart myapp | grep version | cut -d: -f 2 | tr -d ' ')
                                 tar -czvf  myapp-${helmversion}.tgz myapp/
-                                curl -u admin:$nexuspass http://13.234.139.97:8081/repository/helm-hosted/ --upload-file myapp-${helmversion}.tgz -v
+                                curl -u admin:$nexuspass http://ServerIP:8081/repository/helm-hosted/ --upload-file myapp-${helmversion}.tgz -v
                                 '''
                             }
                         }
