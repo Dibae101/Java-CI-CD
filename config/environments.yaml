@@ -1,0 +1,51 @@
+# Environment-specific configurations for different deployment stages
+
+# Development Environment
+dev:
+  aws_region: "us-west-2"
+  cluster_name: "javaapp-eks-dev"
+  kubernetes_version: "1.28"
+  vpc_cidr: "10.0.0.0/16"
+  node_instance_types: ["t3.small"]
+  node_desired_size: 1
+  node_min_size: 1
+  node_max_size: 3
+  app_namespace: "javaapp-dev"
+  app_replicas: 1
+  environment: "dev"
+
+# Staging Environment  
+staging:
+  aws_region: "us-west-2"
+  cluster_name: "javaapp-eks-staging"
+  kubernetes_version: "1.28"
+  vpc_cidr: "10.1.0.0/16"
+  node_instance_types: ["t3.medium"]
+  node_desired_size: 2
+  node_min_size: 1
+  node_max_size: 4
+  app_namespace: "javaapp-staging"
+  app_replicas: 2
+  environment: "staging"
+
+# Production Environment
+production:
+  aws_region: "us-west-2"
+  cluster_name: "javaapp-eks-prod"
+  kubernetes_version: "1.28"
+  vpc_cidr: "10.2.0.0/16"
+  node_instance_types: ["t3.large", "t3.xlarge"]
+  node_desired_size: 3
+  node_min_size: 2
+  node_max_size: 10
+  app_namespace: "javaapp-prod"
+  app_replicas: 3
+  environment: "production"
+
+# Global configurations
+global:
+  project_name: "javaapp"
+  sonar_host_url: "http://sonar.example.com:9000"
+  nexus_host_url: "http://nexus.example.com:8081"
+  notification_email: "devops@example.com"
+  approval_email: "manager@example.com"

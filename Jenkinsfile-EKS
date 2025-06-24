@@ -1,0 +1,347 @@
+pipeline {
+    agent any
+    
+    environment {
+        VERSION = "${env.BUILD_ID}"
+        AWS_REGION = "us-west-2"
+        CLUSTER_NAME = "javaapp-eks-cluster"
+        ECR_REPO = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/javaapp"
+        NAMESPACE = "javaapp"
+        APP_NAME = "myjavaapp"
+    }
+    
+    stages {
+        stage("Checkout") {
+            steps {
+                script {
+                    // Checkout code
+                    checkout scm
+                }
+            }
+        }
+        
+        stage("SonarQube Quality Check") {
+            steps {
+                script {
+                    withSonarQubeEnv(credentialsId: 'sonarapp', variable: 'sonartoken') {
+                        sh 'chmod +x gradlew'
+                        sh './gradlew build'
+                        sh """
+                            ./gradlew sonarqube \
+                                -Dsonar.projectKey=sonarapp \
+                                -Dsonar.host.url=\${SONAR_HOST_URL} \
+                                -Dsonar.login=\$sonartoken
+                        """
+                    }
+
+                    timeout(activity: true, time: 2) {
+                        def qg = waitForQualityGate()
+                        if (qg.status != 'OK') {
+                            error "Pipeline aborted due to quality gate failure: ${qg.status}"
+                        }
+                    }
+                }
+            }
+        }
+        
+        stage("Build Docker Image") {
+            steps {
+                script {
+                    withCredentials([
+                        string(credentialsId: 'aws_access_key_id', variable: 'AWS_ACCESS_KEY_ID'),
+                        string(credentialsId: 'aws_secret_access_key', variable: 'AWS_SECRET_ACCESS_KEY')
+                    ]) {
+                        sh '''
+                            # Configure AWS CLI
+                            aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID
+                            aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY
+                            aws configure set default.region $AWS_REGION
+                            
+                            # Get ECR login token
+                            aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_REPO
+                            
+                            # Build and tag image
+                            docker build -t $ECR_REPO:$VERSION .
+                            docker tag $ECR_REPO:$VERSION $ECR_REPO:latest
+                            
+                            # Push image
+                            docker push $ECR_REPO:$VERSION
+                            docker push $ECR_REPO:latest
+                            
+                            # Clean up local images
+                            docker rmi $ECR_REPO:$VERSION $ECR_REPO:latest || true
+                        '''
+                    }
+                }
+            }
+        }
+        
+        stage("Security Scan with Trivy") {
+            steps {
+                script {
+                    withCredentials([
+                        string(credentialsId: 'aws_access_key_id', variable: 'AWS_ACCESS_KEY_ID'),
+                        string(credentialsId: 'aws_secret_access_key', variable: 'AWS_SECRET_ACCESS_KEY')
+                    ]) {
+                        sh '''
+                            # Install Trivy if not present
+                            if ! command -v trivy &> /dev/null; then
+                                curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+                            fi
+                            
+                            # Scan the image for vulnerabilities
+                            trivy image --format json --output trivy-report.json $ECR_REPO:$VERSION || true
+                            
+                            # Display results
+                            trivy image $ECR_REPO:$VERSION || true
+                        '''
+                    }
+                }
+            }
+        }
+        
+        stage("Helm Chart Validation with Datree") {
+            steps {
+                script {
+                    dir('kubernetes/') {
+                        withEnv(['DATREE_TOKEN=Datree-Token']) {
+                            sh '''
+                                # Install Datree if not present
+                                if ! command -v datree &> /dev/null; then
+                                    curl https://get.datree.io | /bin/bash
+                                fi
+                                
+                                # Test Helm charts
+                                helm datree test myapp/ || true
+                            '''
+                        }
+                    }
+                }
+            }
+        }
+        
+        stage("Infrastructure Deployment") {
+            when {
+                branch 'main'
+            }
+            steps {
+                script {
+                    withCredentials([
+                        string(credentialsId: 'aws_access_key_id', variable: 'AWS_ACCESS_KEY_ID'),
+                        string(credentialsId: 'aws_secret_access_key', variable: 'AWS_SECRET_ACCESS_KEY')
+                    ]) {
+                        dir('terraform/') {
+                            sh '''
+                                # Configure AWS CLI
+                                aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID
+                                aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY
+                                aws configure set default.region $AWS_REGION
+                                
+                                # Initialize Terraform
+                                terraform init
+                                
+                                # Plan deployment
+                                terraform plan -out=tfplan
+                                
+                                # Apply if plan succeeds
+                                terraform apply -auto-approve tfplan
+                            '''
+                        }
+                    }
+                }
+            }
+        }
+        
+        stage("Manual Approval") {
+            when {
+                branch 'main'
+            }
+            steps {
+                script {
+                    timeout(time: 10, unit: 'MINUTES') {
+                        emailext (
+                            subject: "Deployment Approval Required: ${env.JOB_NAME} - Build #${env.BUILD_NUMBER}",
+                            body: """
+                                <h3>Java Application Deployment Approval</h3>
+                                <p><strong>Project:</strong> ${env.JOB_NAME}</p>
+                                <p><strong>Build Number:</strong> ${env.BUILD_NUMBER}</p>
+                                <p><strong>Version:</strong> ${VERSION}</p>
+                                <p><strong>Cluster:</strong> ${CLUSTER_NAME}</p>
+                                <p>Please approve the deployment to proceed.</p>
+                                <p><a href="${env.BUILD_URL}input">Click here to approve/reject</a></p>
+                            """,
+                            mimeType: 'text/html',
+                            to: "${APPROVAL_EMAIL}"
+                        )
+                        
+                        input(
+                            id: "DeployGate",
+                            message: "Deploy ${env.JOB_NAME} version ${VERSION} to EKS?",
+                            ok: 'Deploy',
+                            parameters: [
+                                choice(
+                                    name: 'ENVIRONMENT',
+                                    choices: ['dev', 'staging', 'production'],
+                                    description: 'Select target environment'
+                                )
+                            ]
+                        )
+                    }
+                }
+            }
+        }
+        
+        stage("Deploy to EKS") {
+            when {
+                branch 'main'
+            }
+            steps {
+                script {
+                    withCredentials([
+                        string(credentialsId: 'aws_access_key_id', variable: 'AWS_ACCESS_KEY_ID'),
+                        string(credentialsId: 'aws_secret_access_key', variable: 'AWS_SECRET_ACCESS_KEY')
+                    ]) {
+                        sh '''
+                            # Configure AWS CLI
+                            aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID
+                            aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY
+                            aws configure set default.region $AWS_REGION
+                            
+                            # Configure kubectl
+                            aws eks update-kubeconfig --region $AWS_REGION --name $CLUSTER_NAME
+                            
+                            # Deploy using Helm
+                            cd kubernetes/
+                            helm upgrade --install $APP_NAME myapp/ \
+                                --namespace $NAMESPACE \
+                                --create-namespace \
+                                --set image.repository=$ECR_REPO \
+                                --set image.tag=$VERSION \
+                                --set replicaCount=2 \
+                                --set service.type=LoadBalancer \
+                                --wait \
+                                --timeout=10m
+                            
+                            # Verify deployment
+                            kubectl get pods -n $NAMESPACE
+                            kubectl get svc -n $NAMESPACE
+                        '''
+                    }
+                }
+            }
+        }
+        
+        stage("Health Check") {
+            when {
+                branch 'main'
+            }
+            steps {
+                script {
+                    withCredentials([
+                        string(credentialsId: 'aws_access_key_id', variable: 'AWS_ACCESS_KEY_ID'),
+                        string(credentialsId: 'aws_secret_access_key', variable: 'AWS_SECRET_ACCESS_KEY')
+                    ]) {
+                        sh '''
+                            # Configure kubectl
+                            aws eks update-kubeconfig --region $AWS_REGION --name $CLUSTER_NAME
+                            
+                            # Wait for pods to be ready
+                            kubectl wait --for=condition=Ready --timeout=300s pod -l app.kubernetes.io/instance=$APP_NAME -n $NAMESPACE
+                            
+                            # Perform health check
+                            kubectl run curl-health-check --image=curlimages/curl -i --rm --restart=Never -- curl -f $APP_NAME-myapp:8080 -n $NAMESPACE
+                            
+                            if [ $? -eq 0 ]; then
+                                echo "✅ Health check passed - Application is healthy"
+                            else
+                                echo "❌ Health check failed - Rolling back deployment"
+                                helm rollback $APP_NAME -n $NAMESPACE
+                                exit 1
+                            fi
+                        '''
+                    }
+                }
+            }
+        }
+        
+        stage("Performance Test") {
+            when {
+                branch 'main'
+            }
+            steps {
+                script {
+                    withCredentials([
+                        string(credentialsId: 'aws_access_key_id', variable: 'AWS_ACCESS_KEY_ID'),
+                        string(credentialsId: 'aws_secret_access_key', variable: 'AWS_SECRET_ACCESS_KEY')
+                    ]) {
+                        sh '''
+                            # Get application URL
+                            aws eks update-kubeconfig --region $AWS_REGION --name $CLUSTER_NAME
+                            
+                            # Get external IP/hostname
+                            EXTERNAL_IP=$(kubectl get svc $APP_NAME-myapp -n $NAMESPACE -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+                            
+                            if [ -n "$EXTERNAL_IP" ]; then
+                                echo "Running basic performance test against http://$EXTERNAL_IP:8080"
+                                
+                                # Simple load test using Apache Bench if available
+                                if command -v ab &> /dev/null; then
+                                    ab -n 100 -c 10 http://$EXTERNAL_IP:8080/ || true
+                                else
+                                    echo "Apache Bench not available, skipping performance test"
+                                fi
+                            else
+                                echo "Could not get external IP for load balancer"
+                            fi
+                        '''
+                    }
+                }
+            }
+        }
+    }
+    
+    post {
+        always {
+            script {
+                // Archive test results
+                archiveArtifacts artifacts: '**/trivy-report.json', allowEmptyArchive: true
+                
+                // Clean workspace
+                cleanWs()
+                
+                // Send notification email
+                emailext (
+                    subject: "${currentBuild.result}: ${env.JOB_NAME} - Build #${env.BUILD_NUMBER}",
+                    body: """
+                        <h3>Java Application CI/CD Pipeline Results</h3>
+                        <p><strong>Project:</strong> ${env.JOB_NAME}</p>
+                        <p><strong>Build Number:</strong> ${env.BUILD_NUMBER}</p>
+                        <p><strong>Status:</strong> ${currentBuild.result}</p>
+                        <p><strong>Version:</strong> ${VERSION}</p>
+                        <p><strong>Duration:</strong> ${currentBuild.durationString}</p>
+                        <p><strong>Build URL:</strong> <a href="${env.BUILD_URL}">${env.BUILD_URL}</a></p>
+                        
+                        ${currentBuild.result == 'SUCCESS' ? 
+                            '<p style="color: green;">✅ Deployment completed successfully!</p>' : 
+                            '<p style="color: red;">❌ Deployment failed. Please check the logs.</p>'
+                        }
+                    """,
+                    mimeType: 'text/html',
+                    to: "${NOTIFICATION_EMAIL}"
+                )
+            }
+        }
+        
+        success {
+            echo "🎉 Pipeline completed successfully!"
+        }
+        
+        failure {
+            echo "❌ Pipeline failed. Check logs for details."
+        }
+        
+        unstable {
+            echo "⚠️ Pipeline completed with warnings."
+        }
+    }
+}
